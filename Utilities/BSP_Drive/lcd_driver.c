@@ -1,0 +1,532 @@
+/*!
+    \file  lcd_driver.c
+    \brief lcd driver functions
+
+    \version 2025-02-19, V1.4.0, demo for GD32W51x_F5HC
+*/
+
+/*
+    Copyright (c) 2025, GigaDevice Semiconductor Inc.
+
+    Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+    1. Redistributions of source code must retain the above copyright notice, this
+       list of conditions and the following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright notice,
+       this list of conditions and the following disclaimer in the documentation
+       and/or other materials provided with the distribution.
+    3. Neither the name of the copyright holder nor the names of its contributors
+       may be used to endorse or promote products derived from this software without
+       specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
+OF SUCH DAMAGE.
+*/
+
+#include "gd32c2x1.h"
+#include "lcd_driver.h"
+#include "systick.h"
+
+/* DMA 传输忙标志，1=DMA 正在运行 */
+static volatile uint8_t s_dma_busy = 0U;
+
+void lcd_wait_idle(void)
+{
+    while(s_dma_busy != 0U) {
+    }
+}
+
+/* 由 DMA_Channel2_IRQHandler 调用，处理传输完成 */
+void lcd_dma_irq_handler(void)
+{
+    if(SET == dma_interrupt_flag_get(DMA_CH2, DMA_INT_FLAG_FTF)) {
+        dma_interrupt_flag_clear(DMA_CH2, DMA_INT_FLAG_FTF);
+        /* 等 SPI 移位寄存器发送完毕，再拉高 CS */
+        while(RESET != spi_i2s_flag_get(SPI1, SPI_FLAG_TRANS));
+        spi_dma_disable(SPI1, SPI_DMA_TRANSMIT);
+        dma_channel_disable(DMA_CH2);
+        LCD_CS_SET;
+        s_dma_busy = 0U;
+    }
+}
+
+
+
+#ifdef H_VIEW
+#define X_MAX_PIXEL         (uint16_t)320
+#define Y_MAX_PIXEL         (uint16_t)240
+#else
+#define X_MAX_PIXEL         (uint16_t)240
+#define Y_MAX_PIXEL         (uint16_t)320
+#endif
+
+
+
+static uint8_t spi_write_byte(uint32_t spi_periph, uint8_t byte);
+static void spi1_init(void);
+static void lcd_write_index(uint8_t index);
+static void lcd_write_data(uint8_t data);
+static void lcd_write_data_16bit(uint8_t datah, uint8_t datal);
+static void lcd_reset(void);
+
+/*!
+    \brief      send a byte through the SPI interface and return a byte received from the SPI bus
+    \param[in]  spi_periph: SPIx(x=0,1)
+    \param[in]  byte: data to be send
+    \param[out] none
+    \retval     the value of the received byte
+*/
+static uint8_t spi_write_byte(uint32_t spi_periph, uint8_t byte)
+{
+    __IO uint8_t data;
+    while(RESET == spi_i2s_flag_get(spi_periph, SPI_FLAG_TBE));
+    spi_i2s_data_transmit(spi_periph, (uint16_t)byte);
+    while(RESET == spi_i2s_flag_get(spi_periph, SPI_FLAG_RBNE));
+    data = (uint8_t)spi_i2s_data_receive(spi_periph);
+    return(data);
+}
+/*!
+    \brief      send a halfword through the SPI interface and return a halfwold received from the SPI bus
+    \param[in]  spi_periph: SPIx(x=0,1)
+    \param[in]  halfword: data to be send
+    \param[out] none
+    \retval     the value of the received halfword
+*/
+/*!
+    \brief      initialize SPI1
+    \param[in]  none
+    \param[out] none
+    \retval     none
+*/
+static void spi1_init(void)
+{
+    spi_parameter_struct spi_init_struct;
+    dma_parameter_struct dma_init_struct;
+    /* enable the GPIO clock */
+    rcu_periph_clock_enable(RCU_GPIOA);
+    rcu_periph_clock_enable(RCU_GPIOB);
+    rcu_periph_clock_enable(RCU_GPIOC);
+    /* enable the SPI1 clock */
+    rcu_periph_clock_enable(RCU_SPI1);
+
+    /* SPI1 GPIO configuration: SCK/PB13, MISO/PB14, MOSI/PB15 */
+    gpio_af_set(GPIOB, GPIO_AF_0, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15);
+    gpio_mode_set(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15);
+    gpio_output_options_set(GPIOB, GPIO_OTYPE_PP, GPIO_OSPEED_LEVEL_1, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15);
+
+    /* LCD_CS/PA8 - output push-pull */
+    gpio_mode_set(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO_PIN_8);
+    gpio_output_options_set(GPIOA, GPIO_OTYPE_PP, GPIO_OSPEED_LEVEL_1, GPIO_PIN_8);
+
+    /* LCD_RST/PC6, LCD_DC/PC7 - output push-pull */
+    gpio_mode_set(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO_PIN_6 | GPIO_PIN_7);
+    gpio_output_options_set(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_LEVEL_1, GPIO_PIN_6 | GPIO_PIN_7);
+
+    /* SPI1 parameter configuration */
+    spi_init_struct.trans_mode           = SPI_TRANSMODE_FULLDUPLEX;
+    spi_init_struct.device_mode          = SPI_MASTER;
+    spi_init_struct.frame_size           = SPI_FRAMESIZE_8BIT;
+    spi_init_struct.clock_polarity_phase = SPI_CK_PL_LOW_PH_1EDGE;
+    spi_init_struct.nss                  = SPI_NSS_SOFT;
+    spi_init_struct.prescale             = SPI_PSC_8;
+    spi_init_struct.endian               = SPI_ENDIAN_MSB;
+    spi_init(SPI1, &spi_init_struct);
+
+    /* Critical: enable byte access for SPI1 FIFO (otherwise each write pushes 2 bytes!) */
+    spi_fifo_access_size_config(SPI1, SPI_BYTE_ACCESS);
+
+    /* Enable DMA and DMAMUX clocks (SPI DMA TX will be enabled only during pixel transfer) */
+    rcu_periph_clock_enable(RCU_DMA);
+    rcu_periph_clock_enable(RCU_DMAMUX);
+
+    dma_deinit(DMA_CH2);
+    dma_struct_para_init(&dma_init_struct);
+    dma_init_struct.periph_addr  = (uint32_t)&SPI_DATA(SPI1);
+    dma_init_struct.periph_width = DMA_PERIPHERAL_WIDTH_8BIT;
+    dma_init_struct.memory_width = DMA_MEMORY_WIDTH_8BIT;
+    dma_init_struct.priority     = DMA_PRIORITY_HIGH;
+    dma_init_struct.periph_inc   = DMA_PERIPH_INCREASE_DISABLE;
+    dma_init_struct.memory_inc   = DMA_MEMORY_INCREASE_ENABLE;
+    dma_init_struct.direction    = DMA_MEMORY_TO_PERIPHERAL;
+    dma_init_struct.request      = DMA_REQUEST_SPI1_TX;
+    dma_init(DMA_CH2, &dma_init_struct);
+    dma_interrupt_enable(DMA_CH2, DMA_INT_FTF);
+    nvic_irq_enable(DMA_Channel2_IRQn, 1U);
+
+    spi_enable(SPI1);
+}
+
+/*!
+    \brief      write the register address
+    \param[in]  index: the value of register address to be written
+    \param[out] none
+    \retval     none
+*/
+static void lcd_write_index(uint8_t index)
+{
+    while(RESET != spi_i2s_flag_get(SPI1, SPI_FLAG_TRANS));
+    LCD_RS_CLR;
+    spi_write_byte(SPI1, index);
+}
+
+/*!
+    \brief      write the register data
+    \param[in]  data: the value of register data to be written
+    \param[out] none
+    \retval     none
+*/
+static void lcd_write_data(uint8_t data)
+{
+    while(RESET != spi_i2s_flag_get(SPI1, SPI_FLAG_TRANS));
+    LCD_RS_SET;
+    spi_write_byte(SPI1, data);
+}
+
+/*!
+    \brief      write the register data(an unsigned 16-bit data)
+    \param[in]  datah: the high 8bit of register data to be written
+    \param[in]  datal: the low 8bit of register data to be written
+    \param[out] none
+    \retval     none
+*/
+static void lcd_write_data_16bit(uint8_t datah, uint8_t datal)
+{
+    lcd_write_data(datah);
+    lcd_write_data(datal);
+}
+
+
+/*!
+    \brief      reset the lcd
+    \param[in]  none
+    \param[out] none
+    \retval     none
+*/
+static void lcd_reset(void)
+{
+    LCD_RST_CLR;
+    delay_1ms(100);
+    LCD_RST_SET;
+    delay_1ms(50);
+}
+
+/*!
+    \brief      initialize the lcd
+    \param[in]  none
+    \param[out] none
+    \retval     none
+*/
+void lcd_init(void)
+{
+    spi1_init();
+
+    LCD_CS_CLR;
+    lcd_reset();
+
+    /* write the register address 0xCB*/
+    lcd_write_index(0xCB);
+    lcd_write_data(0x39);
+    lcd_write_data(0x2C);
+    lcd_write_data(0x00);
+    lcd_write_data(0x34);
+    lcd_write_data(0x02);
+
+    /* write the register address 0xCF*/
+    lcd_write_index(0xCF);
+    lcd_write_data(0x00);
+    lcd_write_data(0XC1);
+    lcd_write_data(0X30);
+
+    /* write the register address 0xE8*/
+    lcd_write_index(0xE8);
+    lcd_write_data(0x85);
+    lcd_write_data(0x00);
+    lcd_write_data(0x78);
+
+    /* write the register address 0xEA*/
+    lcd_write_index(0xEA);
+    lcd_write_data(0x00);
+    lcd_write_data(0x00);
+
+    /* write the register address 0xED*/
+    lcd_write_index(0xED);
+    lcd_write_data(0x64);
+    lcd_write_data(0x03);
+    lcd_write_data(0X12);
+    lcd_write_data(0X81);
+
+    /* write the register address 0xF7*/
+    lcd_write_index(0xF7);
+    lcd_write_data(0x20);
+
+    /* power control VRH[5:0] */
+    lcd_write_index(0xC0);
+    lcd_write_data(0x23);
+
+    /* power control SAP[2:0];BT[3:0] */
+    lcd_write_index(0xC1);
+    lcd_write_data(0x10);
+
+    /* vcm control */
+    lcd_write_index(0xC5);
+    lcd_write_data(0x3e);
+    lcd_write_data(0x28);
+
+    /* vcm control2 */
+    lcd_write_index(0xC7);
+    lcd_write_data(0x86);
+
+    lcd_write_index(0x36);
+#ifdef H_VIEW
+    lcd_write_data(0x28);   /* 横屏旋转180度 (MY/MX 相对 0xE8 取反) */
+#else
+    lcd_write_data(0x88);   /* 竖屏旋转180度 (MY/MX 相对 0x48 取反) */
+#endif
+
+    /* write the register address 0x3A*/
+    lcd_write_index(0x3A);
+    lcd_write_data(0x55);
+
+    /* write the register address 0xB1*/
+    lcd_write_index(0xB1);
+    lcd_write_data(0x00);
+    lcd_write_data(0x18);
+
+    /* display function control */
+    lcd_write_index(0xB6);
+    lcd_write_data(0x08);
+    lcd_write_data(0x82);
+    lcd_write_data(0x27);
+
+    /* 3gamma function disable */
+    lcd_write_index(0xF2);
+    lcd_write_data(0x00);
+
+    /* gamma curve selected  */
+    lcd_write_index(0x26);
+    lcd_write_data(0x01);
+
+    /* set gamma  */
+    lcd_write_index(0xE0);
+    lcd_write_data(0x0F);
+    lcd_write_data(0x31);
+    lcd_write_data(0x2B);
+    lcd_write_data(0x0C);
+    lcd_write_data(0x0E);
+    lcd_write_data(0x08);
+    lcd_write_data(0x4E);
+    lcd_write_data(0xF1);
+    lcd_write_data(0x37);
+    lcd_write_data(0x07);
+    lcd_write_data(0x10);
+    lcd_write_data(0x03);
+    lcd_write_data(0x0E);
+    lcd_write_data(0x09);
+    lcd_write_data(0x00);
+
+    /* set gamma  */
+    lcd_write_index(0XE1);
+    lcd_write_data(0x00);
+    lcd_write_data(0x0E);
+    lcd_write_data(0x14);
+    lcd_write_data(0x03);
+    lcd_write_data(0x11);
+    lcd_write_data(0x07);
+    lcd_write_data(0x31);
+    lcd_write_data(0xC1);
+    lcd_write_data(0x48);
+    lcd_write_data(0x08);
+    lcd_write_data(0x0F);
+    lcd_write_data(0x0C);
+    lcd_write_data(0x31);
+    lcd_write_data(0x36);
+    lcd_write_data(0x0F);
+
+    /* exit sleep */
+    lcd_write_index(0x11);
+    delay_1ms(120);
+
+    /* display on */
+    lcd_write_index(0x29);
+    lcd_write_index(0x2c);
+
+    LCD_CS_SET;
+}
+
+/*!
+    \brief      set lcd display region
+    \param[in]  x_start: the x position of the start point
+    \param[in]  y_start: the y position of the start point
+    \param[in]  x_end: the x position of the end point
+    \param[in]  y_end: the y position of the end point
+    \param[out] none
+    \retval     none
+*/
+void lcd_set_region(uint16_t x_start, uint16_t y_start, uint16_t x_end, uint16_t y_end)
+{
+    LCD_CS_CLR;
+
+    /* write the register address 0x2A*/
+    lcd_write_index(0x2A);
+    lcd_write_data_16bit(x_start >> 8, x_start);
+    lcd_write_data_16bit(x_end >> 8, x_end);
+
+    /* write the register address 0x2B*/
+    lcd_write_index(0x2B);
+    lcd_write_data_16bit(y_start >> 8, y_start);
+    lcd_write_data_16bit(y_end >> 8, y_end);
+
+    /* write the register address 0x2C*/
+    lcd_write_index(0x2C);
+    LCD_CS_SET;
+}
+
+/*!
+    \brief      set the start display point of lcd
+    \param[in]  x: the x position of the start point
+    \param[in]  y: the y position of the start point
+    \param[out] none
+    \retval     none
+*/
+void lcd_set_xy(uint16_t x, uint16_t y)
+{
+    /* write the register address 0x2A*/
+    lcd_write_index(0x2A);
+    lcd_write_data_16bit(x >> 8, x);
+
+    /* write the register address 0x2B*/
+    lcd_write_index(0x2B);
+    lcd_write_data_16bit(y >> 8, y);
+
+    /* write the register address 0x2C*/
+    lcd_write_index(0x2C);
+}
+
+/*!
+    \brief      draw a point on the lcd
+    \param[in]  x: the x position of the point
+    \param[in]  y: the y position of the point
+    \param[in]  data: the register data to be written
+    \param[out] none
+    \retval     none
+*/
+void gui_draw_point(uint16_t x, uint16_t y, uint16_t data)
+{
+    lcd_set_xy(x, y);
+    lcd_write_data(data >> 8);
+    lcd_write_data(data);
+}
+
+/*!
+    \brief      clear the lcd
+    \param[in]  color: lcd display color
+    \param[out] none
+    \retval     none
+*/
+void lcd_clear(uint16_t color)
+{
+    unsigned int i, m;
+    LCD_CS_CLR;
+    /* set column address */
+    lcd_write_index(0x2A);
+    lcd_write_data(0x00); lcd_write_data(0x00);
+    lcd_write_data((X_MAX_PIXEL - 1) >> 8); lcd_write_data((X_MAX_PIXEL - 1) & 0xFF);
+    /* set row address */
+    lcd_write_index(0x2B);
+    lcd_write_data(0x00); lcd_write_data(0x00);
+    lcd_write_data((Y_MAX_PIXEL - 1) >> 8); lcd_write_data((Y_MAX_PIXEL - 1) & 0xFF);
+    /* memory write */
+    lcd_write_index(0x2C);
+    LCD_RS_SET;
+    for(i = 0; i < Y_MAX_PIXEL; i ++) {
+        for(m = 0; m < X_MAX_PIXEL; m ++) {
+            spi_write_byte(SPI1, color >> 8);
+            spi_write_byte(SPI1, color & 0xFF);
+        }
+    }
+    LCD_CS_SET;
+}
+
+/*!
+    \brief      fill LCD region with specific color
+    \param[in]  x: the x position of the start point
+    \param[in]  y: the y position of the start point
+    \param[in]  w: width of the region
+    \param[in]  h: height of the region
+    \param[in]  color: fill color
+    \param[out] none
+    \retval     none
+*/
+void lcd_fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
+{
+    uint32_t total = (uint32_t)w * h;
+    uint32_t i;
+
+    lcd_wait_idle();
+
+    LCD_CS_CLR;
+    /* set column address */
+    lcd_write_index(0x2A);
+    lcd_write_data(x >> 8); lcd_write_data(x & 0xFF);
+    lcd_write_data((x + w - 1) >> 8); lcd_write_data((x + w - 1) & 0xFF);
+    /* set row address */
+    lcd_write_index(0x2B);
+    lcd_write_data(y >> 8); lcd_write_data(y & 0xFF);
+    lcd_write_data((y + h - 1) >> 8); lcd_write_data((y + h - 1) & 0xFF);
+    /* memory write */
+    lcd_write_index(0x2C);
+    LCD_RS_SET;
+    for(i = 0; i < total; i++) {
+        spi_write_byte(SPI1, color >> 8);
+        spi_write_byte(SPI1, color & 0xFF);
+    }
+    LCD_CS_SET;
+}
+
+/*!
+    \brief      copy image data to LCD
+    \param[in]  x: the x position of the start point
+    \param[in]  y: the y position of the start point
+    \param[in]  w: width of the region
+    \param[in]  h: height of the region
+    \param[in]  src_data: pointer to the pixel data (RGB565)
+    \param[out] none
+    \retval     none
+*/
+void lcd_copy(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t *src_data)
+{
+    uint32_t total = (uint32_t)w * h;
+
+    lcd_wait_idle();
+
+    LCD_CS_CLR;
+    /* set column address */
+    lcd_write_index(0x2A);
+    lcd_write_data(x >> 8); lcd_write_data(x & 0xFF);
+    lcd_write_data((x + w - 1) >> 8); lcd_write_data((x + w - 1) & 0xFF);
+    /* set row address */
+    lcd_write_index(0x2B);
+    lcd_write_data(y >> 8); lcd_write_data(y & 0xFF);
+    lcd_write_data((y + h - 1) >> 8); lcd_write_data((y + h - 1) & 0xFF);
+    /* memory write */
+    lcd_write_index(0x2C);
+    while(RESET != spi_i2s_flag_get(SPI1, SPI_FLAG_TRANS));
+    LCD_RS_SET;
+
+    dma_channel_disable(DMA_CH2);
+    dma_interrupt_flag_clear(DMA_CH2, DMA_INT_FLAG_FTF);
+    dma_memory_address_config(DMA_CH2, (uint32_t)src_data);
+    dma_transfer_number_config(DMA_CH2, total * 2U);
+    s_dma_busy = 1U;
+    spi_dma_enable(SPI1, SPI_DMA_TRANSMIT);
+    dma_channel_enable(DMA_CH2);
+}

@@ -1,0 +1,3 @@
+[submodule "Utilities/Third_Party/lvgl/lvgl_src"]
+	path = Utilities/Third_Party/lvgl/lvgl_src
+	url = git@172.21.15.151:gui/common/lvgl/lvgl_v8.git
