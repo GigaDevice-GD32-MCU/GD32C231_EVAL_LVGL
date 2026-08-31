@@ -1,4 +1,3 @@
-<<<<<<< README.md
 # LVGL V8.3 ported to the GD32C231C-EVAL
 
 This project ports `LVGL V8.3` to the `GD32C231C-EVAL` platform for GUI demonstrations.
