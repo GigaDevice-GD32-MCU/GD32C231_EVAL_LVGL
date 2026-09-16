@@ -2696,9 +2696,6 @@
             <name>$PROJ_DIR$\..\..\Utilities\Third_Party\lvgl\lvgl_src\src\widgets\lv_dropdown.c</name>
         </file>
         <file>
-            <name>$PROJ_DIR$\..\..\Utilities\Third_Party\lvgl\lvgl_src\src\widgets\lv_gradient_progress.c</name>
-        </file>
-        <file>
             <name>$PROJ_DIR$\..\..\Utilities\Third_Party\lvgl\lvgl_src\src\widgets\lv_img.c</name>
         </file>
         <file>

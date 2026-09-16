@@ -1388,11 +1388,6 @@
               <FilePath>..\..\Utilities\Third_Party\lvgl\lvgl_src\src\widgets\lv_dropdown.c</FilePath>
             </File>
             <File>
-              <FileName>lv_gradient_progress.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Utilities\Third_Party\lvgl\lvgl_src\src\widgets\lv_gradient_progress.c</FilePath>
-            </File>
-            <File>
               <FileName>lv_img.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Utilities\Third_Party\lvgl\lvgl_src\src\widgets\lv_img.c</FilePath>
