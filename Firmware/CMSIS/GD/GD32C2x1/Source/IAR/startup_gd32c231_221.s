@@ -2,7 +2,7 @@
 ;    \file    startup_gd32c231xx.s
 ;    \brief   start up file
 ;
-;    \version 2026-02-05, V1.3.0, firmware for gd32c2x1
+;    \version 2026-06-24, V1.4.0, firmware for gd32c2x1
 ;*/
 ;
 ;/*

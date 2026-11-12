@@ -36,7 +36,8 @@
 #include "gd32c2x1.h"
 
 /* system frequency define */
-#define __IRC48M            (IRC48M_VALUE)            /* internal 48 MHz RC oscillator frequency */
+#define __IRC48M            (IRC48M_VALUE)            /* HIRC internal 48 MHz RC oscillator frequency */
+#define __IRC12M            (IRC12M_VALUE)            /* HIRC internal 12 MHz RC oscillator frequency */
 #define __HXTAL             (HXTAL_VALUE)             /* high speed crystal oscillator frequency */
 #define __LXTAL             (LXTAL_VALUE)             /* low speed crystal oscillator frequency */
 #define __IRC32K            (IRC32K_VALUE)            /* internal 32 KHz RC oscillator frequency */
@@ -45,13 +46,14 @@
 #define VECT_TAB_OFFSET  (uint32_t)0x00000000U        /* vector table base offset */
 
 /* select a system clock by uncommenting the following line */
-#define __SYSTEM_CLOCK_IRC48M                (__IRC48M)
+//#define __SYSTEM_CLOCK_12M_IRC12M            (__IRC12M)
+#define __SYSTEM_CLOCK_48M_IRC48M            (__IRC48M)
 //#define __SYSTEM_CLOCK_HXTAL                 (__HXTAL)
 
 //#define __SYSTEM_CLOCK_LXTAL                 (__LXTAL)
 //#define __SYSTEM_CLOCK_IRC32K                (__IRC32K)
 
-#define SEL_IRC48MDIV   0x00
+#define SEL_HIRCDIV     0x00
 #define SEL_HXTAL       0x01
 #define SEL_IRC32K      0x02
 #define SEL_LXTAL       0x03
@@ -61,9 +63,13 @@
 uint32_t SystemCoreClock = __SYSTEM_CLOCK_HXTAL;
 static void system_clock_hxtal(void);
 
-#elif defined (__SYSTEM_CLOCK_IRC48M)
-uint32_t SystemCoreClock = __SYSTEM_CLOCK_IRC48M;
-static void system_clock_irc48m(void);
+#elif defined (__SYSTEM_CLOCK_48M_IRC48M)
+uint32_t SystemCoreClock = __SYSTEM_CLOCK_48M_IRC48M;
+static void system_clock_48m_irc48m(void);
+
+#elif defined (__SYSTEM_CLOCK_12M_IRC12M)
+uint32_t SystemCoreClock = __SYSTEM_CLOCK_12M_IRC12M;
+static void system_clock_12m_irc12m(void);
 
 #elif defined (__SYSTEM_CLOCK_LXTAL)
 uint32_t SystemCoreClock = __SYSTEM_CLOCK_LXTAL;
@@ -87,9 +93,9 @@ static void system_clock_config(void);
 */
 void SystemInit(void)
 {
-    /* enable IRC48M */
-    RCU_CTL0 |= RCU_CTL0_IRC48MEN;
-    while(0U == (RCU_CTL0 & RCU_CTL0_IRC48MSTB)) {
+    /* enable HIRC */
+    RCU_CTL0 |= RCU_CTL0_HIRCEN;
+    while(0U == (RCU_CTL0 & RCU_CTL0_HIRCSTB)) {
     }
     RCU_CFG0 &= ~RCU_CFG0_SCS;
     /* reset CTL register */
@@ -123,8 +129,10 @@ static void system_clock_config(void)
 {
 #ifdef __SYSTEM_CLOCK_HXTAL
     system_clock_hxtal();
-#elif defined (__SYSTEM_CLOCK_IRC48M)
-    system_clock_irc48m();
+#elif defined (__SYSTEM_CLOCK_48M_IRC48M)
+    system_clock_48m_irc48m();
+#elif defined (__SYSTEM_CLOCK_12M_IRC12M)
+    system_clock_12m_irc12m();
 #elif defined (__SYSTEM_CLOCK_LXTAL)
     system_clock_lxtal();
 #elif defined (__SYSTEM_CLOCK_IRC32K)
@@ -179,7 +187,7 @@ static void system_clock_hxtal(void)
     }
 }
 
-#elif defined (__SYSTEM_CLOCK_IRC48M)
+#elif defined (__SYSTEM_CLOCK_48M_IRC48M)
 /*!
     \brief      configure the system clock to IRC48M
     \param[in]  none
@@ -188,25 +196,25 @@ static void system_clock_hxtal(void)
     \note       This function may contain scenarios leading to an infinite loop.
                 Modify it according to the actual usage requirements.
 */
-static void system_clock_irc48m(void)
+static void system_clock_48m_irc48m(void)
 {
     uint32_t timeout = 0U;
     uint32_t stab_flag = 0U;
 
     FMC_WS =(FMC_WS & (~FMC_WS_WSCNT)) | FMC_WAIT_STATE_1;
 
-    /* enable IRC48M */
-    RCU_CTL0 |= RCU_CTL0_IRC48MEN;
-    /* IRC48M divide by 1 */
-    rcu_irc48mdiv_sys_clock_config(RCU_IRC48MDIV_SYS_1);
+    /* enable HIRC */
+    RCU_CTL0 |= RCU_CTL0_HIRCEN;
+    /* HIRC divide by 1 */
+    rcu_hircdiv_sys_clock_config(RCU_HIRCDIV_SYS_1);
 
     /* wait until IRC48M is stable or the startup time is longer than IRC48M_STARTUP_TIMEOUT */
     do {
         timeout++;
-        stab_flag = (RCU_CTL0 & RCU_CTL0_IRC48MSTB);
+        stab_flag = (RCU_CTL0 & RCU_CTL0_HIRCSTB);
     } while((0U == stab_flag) && (IRC48M_STARTUP_TIMEOUT != timeout));
     /* if fail */
-    if(0U == (RCU_CTL0 & RCU_CTL0_IRC48MSTB)) {
+    if(0U == (RCU_CTL0 & RCU_CTL0_HIRCSTB)) {
         while(1) {
         }
     }
@@ -219,12 +227,65 @@ static void system_clock_irc48m(void)
 
     /* select IRC48M as system clock */
     RCU_CFG0 &= ~RCU_CFG0_SCS;
-    RCU_CFG0 |= RCU_CKSYSSRC_IRC48MDIV_SYS;
+    RCU_CFG0 |= RCU_CKSYSSRC_HIRCDIV_SYS;
 
     /* wait until IRC48M is selected as system clock */
-    while((RCU_CFG0 & RCU_CFG0_SCSS) != RCU_SCSS_IRC48MDIV) {
+    while((RCU_CFG0 & RCU_CFG0_SCSS) != RCU_SCSS_HIRCDIV) {
     }
 }
+#elif defined (__SYSTEM_CLOCK_12M_IRC12M)
+/*!
+    \brief      configure the system clock to IRC48M
+    \param[in]  none
+    \param[out] none
+    \retval     none
+    \note       This function may contain scenarios leading to an infinite loop.
+                Modify it according to the actual usage requirements.
+*/
+static void system_clock_12m_irc12m(void)
+{
+    uint32_t timeout = 0U;
+    uint32_t stab_flag = 0U;
+    __IO uint32_t reg_temp;
+
+    FMC_WS =(FMC_WS & (~FMC_WS_WSCNT));
+
+    /* enable HIRC */
+    RCU_CTL0 |= RCU_CTL0_HIRCEN;
+    /* configure HIRC to IRC12M and divider to 1 */
+    reg_temp = RCU_CTL0;
+    reg_temp &= ~(RCU_CTL0_HIRCDIV_SYS | RCU_CTL0_HIRCSEL);
+    reg_temp |= (RCU_HIRCDIV_SYS_1 | RCU_CTL0_HIRCSEL);   
+    RCU_CTL0 = reg_temp;
+    /* HIRC divide by 1 */
+    rcu_hircdiv_sys_clock_config(RCU_HIRCDIV_SYS_1);
+
+    /* wait until IRC48M is stable or the startup time is longer than IRC48M_STARTUP_TIMEOUT */
+    do {
+        timeout++;
+        stab_flag = (RCU_CTL0 & RCU_CTL0_HIRCSTB);
+    } while((0U == stab_flag) && (IRC48M_STARTUP_TIMEOUT != timeout));
+    /* if fail */
+    if(0U == (RCU_CTL0 & RCU_CTL0_HIRCSTB)) {
+        while(1) {
+        }
+    }
+
+    /* IRC48M is stable */
+    /* AHB = SYSCLK */
+    RCU_CFG0 |= RCU_AHB_CKSYS_DIV1;
+    /* APB = AHB */
+    RCU_CFG0 |= RCU_APB_CKAHB_DIV1;
+
+    /* select IRC48M as system clock */
+    RCU_CFG0 &= ~RCU_CFG0_SCS;
+    RCU_CFG0 |= RCU_CKSYSSRC_HIRCDIV_SYS;
+
+    /* wait until IRC48M is selected as system clock */
+    while((RCU_CFG0 & RCU_CFG0_SCSS) != RCU_SCSS_HIRCDIV) {
+    }
+}
+
 
 #elif defined (__SYSTEM_CLOCK_LXTAL)
 /*!
@@ -311,16 +372,21 @@ void SystemCoreClockUpdate(void)
 {
     uint32_t sws = 0U;
     uint32_t idx = 0U, clk_exp = 0U;
-    uint32_t irc48mdiv_sys = 0U;
+    uint32_t hirc_freq = 0U, hircdiv_sys = 0U;
     /* exponent of AHB clock divider */
     const uint8_t ahb_exp[16] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 6, 7, 8, 9};
-
+    /* calculate HIRC clock frequency */
+    if(RCU_CTL0 & RCU_CTL0_HIRCSEL) {
+        hirc_freq = 12000000U;
+    } else {
+        hirc_freq = 48000000U;
+    }
     sws = GET_BITS(RCU_CFG0, 2, 3);
     switch(sws) {
-    /* IRC48M is selected as CK_SYS */
-    case SEL_IRC48MDIV:
-        irc48mdiv_sys = GET_BITS(RCU_CTL0, 29, 31);
-        SystemCoreClock = IRC48M_VALUE / (1 << irc48mdiv_sys);
+    /* HIRC is selected as CK_SYS */
+    case SEL_HIRCDIV:
+        hircdiv_sys = GET_BITS(RCU_CTL0, 29, 31);
+        SystemCoreClock = hirc_freq / (1U << hircdiv_sys);
         break;
     /* HXTAL is selected as CK_SYS */
     case SEL_HXTAL:
@@ -330,13 +396,13 @@ void SystemCoreClockUpdate(void)
     case SEL_IRC32K:
         SystemCoreClock = IRC32K_VALUE;
         break;
-    /* IRC32K is selected as CK_SYS */
+    /* LXTAL is selected as CK_SYS */
     case SEL_LXTAL:
         SystemCoreClock = LXTAL_VALUE;
         break;
-    /* IRC48M is selected as CK_SYS */
+    /* HIRC is selected as CK_SYS (default) */
     default:
-        SystemCoreClock = IRC48M_VALUE/4;
+        SystemCoreClock = hirc_freq / 4U;
         break;
     }
     /* calculate AHB clock frequency */

@@ -2,7 +2,7 @@
     \file    gd32c2x1.h
     \brief   general definitions for gd32c2x1
 
-    \version 2026-02-05, V1.3.0, firmware for gd32c2x1
+    \version 2026-08-19, V1.5.0, firmware for gd32c2x1
 */
 
 /*
@@ -57,19 +57,23 @@ extern "C" {
 #define HXTAL_STARTUP_TIMEOUT   ((uint16_t)0x0FFFF)
 #endif /* high speed crystal oscillator startup timeout */
 
-/* define value of internal 48MHz RC oscillator (IRC48M) in Hz */
 #if !defined  (IRC48M_VALUE)
-#define IRC48M_VALUE  ((uint32_t)48000000)
-#endif /* internal 48MHz RC oscillator value */
+#define IRC48M_VALUE ((uint32_t)48000000)
+#endif /* IRC48M_VALUE */
 
 /* define startup timeout value of internal 48MHz RC oscillator (IRC48M) */
 #if !defined  (IRC48M_STARTUP_TIMEOUT)
 #define IRC48M_STARTUP_TIMEOUT   ((uint16_t)0x0500)
 #endif /* internal 48MHz RC oscillator startup timeout */
 
-#if !defined  (IRC48M_VALUE)
-#define IRC48M_VALUE ((uint32_t)48000000)
-#endif /* IRC48M_VALUE */
+#if !defined  (IRC12M_VALUE)
+#define IRC12M_VALUE ((uint32_t)12000000)
+#endif /* IRC12M_VALUE */
+
+/* define startup timeout value of internal 12MHz RC oscillator (IRC12M) */
+#if !defined  (IRC12M_STARTUP_TIMEOUT)
+#define IRC12M_STARTUP_TIMEOUT   ((uint16_t)0x0500)
+#endif /* internal 12MHz RC oscillator startup timeout */
 
 /* define value of internal 32KHz RC oscillator(IRC32K) in Hz */
 #if !defined  (IRC32K_VALUE)
