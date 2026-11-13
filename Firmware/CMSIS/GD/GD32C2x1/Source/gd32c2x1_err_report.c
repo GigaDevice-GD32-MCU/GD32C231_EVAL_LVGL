@@ -2,7 +2,7 @@
     \file    gd32xxx_report_err.c
     \brief   Reporting Error driver
 
-    \version 2026-02-05, V1.3.0, firmware for gd32c2x1
+    \version 2026-08-19, V1.5.0, firmware for gd32c2x1
 */
 
 /*

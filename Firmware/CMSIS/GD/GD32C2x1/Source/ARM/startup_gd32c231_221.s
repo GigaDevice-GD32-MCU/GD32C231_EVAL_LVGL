@@ -2,7 +2,7 @@
 ;    \file    startup_gd32c31xx.s
 ;    \brief   start up file
 ;
-;    \version 2026-02-05, V1.3.0, firmware for gd32c2x1
+;    \version 2026-08-19, V1.5.0, firmware for gd32c2x1
 ;*/
 ;
 ;/*
@@ -47,7 +47,7 @@ __initial_sp
 ;   <o>  Heap Size (in Bytes) <0x0-0xFFFFFFFF:8>
 ; </h>
 
-Heap_Size       EQU     0x00000000
+Heap_Size       EQU     0x00000400
 
                 AREA    HEAP, NOINIT, READWRITE, ALIGN=3
 __heap_base
